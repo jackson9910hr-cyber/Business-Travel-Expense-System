@@ -154,6 +154,32 @@
     pointer-events:none;
   }
 
+  .title-field{
+    font-family:'Gowun Dodum', 'Noto Sans KR', sans-serif;
+    font-size:19px;
+    font-weight:400;
+    color:var(--ink);
+    text-align:center;
+    line-height:1.4;
+    min-height:1.4em;
+    padding:11px 14px;
+    margin:2px 4px 16px;
+    border:1.5px dashed #d9d1ba;
+    border-radius:8px;
+    background:#fffef9;
+    outline:none;
+    word-break:break-word;
+  }
+  .title-field:empty::before{
+    content: attr(data-placeholder);
+    color:var(--ink-soft);
+    font-weight:400;
+  }
+  .title-field:focus{
+    border-style:solid;
+    border-color:var(--accent);
+  }
+
   .summary{
     display:grid;
     grid-template-columns:repeat(4,1fr);
@@ -422,6 +448,7 @@
 
     <div class="paper-wrap">
       <div class="paper" id="paper">
+        <div class="title-field" id="tripTitle" contenteditable="true" data-placeholder="제목을 입력하세요 (예: 부산 출장 9/15~9/17)"></div>
         <div class="summary" id="summary">
           <div class="summary-item">
             <span class="cat-name"><span class="dot" style="background:var(--transport)"></span>교통비</span>
@@ -530,6 +557,7 @@
   var shareModal = document.getElementById("shareModal");
   var toastEl = document.getElementById("toast");
   var paperEl = document.getElementById("paper");
+  var tripTitleEl = document.getElementById("tripTitle");
 
   var btnAdd = document.getElementById("btnAdd");
   var btnDelete = document.getElementById("btnDelete");
@@ -539,6 +567,21 @@
   function uid(){
     return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
   }
+
+  // Title is a plain contenteditable field (not <input>) so its typed text
+  // is real DOM text content, which html2canvas captures reliably — form
+  // control values are not always rendered consistently across browsers.
+  tripTitleEl.addEventListener("paste", function(e){
+    e.preventDefault();
+    var text = (e.clipboardData || window.clipboardData).getData("text/plain");
+    document.execCommand("insertText", false, text);
+  });
+  tripTitleEl.addEventListener("keydown", function(e){
+    if (e.key === "Enter"){ e.preventDefault(); tripTitleEl.blur(); }
+  });
+  tripTitleEl.addEventListener("input", function(){
+    if (tripTitleEl.textContent.trim() === "") tripTitleEl.innerHTML = "";
+  });
 
 
   function fmtWon(n){
@@ -789,6 +832,7 @@
   btnShare.addEventListener("click", function(){
     if (!receipts.length){ showToast("먼저 영수증을 첨부해주세요"); return; }
     exitModes();
+    tripTitleEl.blur();
     shareModal.hidden = false;
   });
   document.getElementById("btnCloseShare").addEventListener("click", function(){ shareModal.hidden = true; });
