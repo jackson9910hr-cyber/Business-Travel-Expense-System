@@ -800,44 +800,17 @@
     return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate());
   }
 
+  // Renders paperEl straight through html2canvas's own scale option — the
+  // documented, single-pass way to get a higher-resolution capture. An
+  // earlier version tried to patch native-resolution photos onto the
+  // canvas afterwards using manually recomputed element positions; on some
+  // devices those positions drifted from what html2canvas actually
+  // rendered (viewport/toolbar reflow between the async screenshot and the
+  // patch pass), producing a misaligned double-exposure ghost of each
+  // photo. A single html2canvas pass has no second coordinate system to
+  // drift out of sync with, so it can't produce that artifact.
   function captureCanvas(){
-    return html2canvas(paperEl, { scale: 2, backgroundColor: "#fffdf8", useCORS: true })
-      .then(patchCanvasWithNativePhotos);
-  }
-
-  // html2canvas rasterizes photos at their on-screen thumbnail size, which
-  // is much lower resolution than the stored original. After the screenshot,
-  // redraw each full (uncropped) photo from its original <img> onto the
-  // exact same rotated rect so captures/PDF/share keep native photo quality.
-  // Cards render each photo at its own natural aspect ratio (no cropping),
-  // so the frame's box already matches the source image's proportions.
-  function patchCanvasWithNativePhotos(canvas){
-    var paperRect = paperEl.getBoundingClientRect();
-    if (!paperRect.width) return canvas;
-    var pxRatio = canvas.width / paperRect.width;
-    var ctx = canvas.getContext("2d");
-    grid.querySelectorAll(".card").forEach(function(card){
-      var r = receipts.find(function(x){ return x.id === card.dataset.id; });
-      var frame = card.querySelector(".photo-frame");
-      var imgEl = frame && frame.querySelector("img");
-      if (!r || !imgEl || !imgEl.naturalWidth) return;
-      var frameRect = frame.getBoundingClientRect();
-      var centerX = (frameRect.left + frameRect.right) / 2;
-      var centerY = (frameRect.top + frameRect.bottom) / 2;
-      var localW = frame.offsetWidth;
-      var localH = frame.offsetHeight;
-      var rotRad = (parseFloat(r.rot) || 0) * Math.PI / 180;
-      var destCenterX = (centerX - paperRect.left) * pxRatio;
-      var destCenterY = (centerY - paperRect.top) * pxRatio;
-      var destW = localW * pxRatio;
-      var destH = localH * pxRatio;
-      ctx.save();
-      ctx.translate(destCenterX, destCenterY);
-      ctx.rotate(rotRad);
-      ctx.drawImage(imgEl, -destW / 2, -destH / 2, destW, destH);
-      ctx.restore();
-    });
-    return canvas;
+    return html2canvas(paperEl, { scale: 3, backgroundColor: "#fffdf8", useCORS: true });
   }
 
   // Inside the Claude Artifact viewer, script-driven downloads (<a download>,
