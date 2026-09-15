@@ -454,7 +454,7 @@
       </div>
     </div>
 
-    <footer class="hint">사진을 탭하면 항목/금액을 입력할 수 있어요 · 모든 데이터는 이 기기에만 저장됩니다</footer>
+    <footer class="hint">사진을 탭하면 항목/금액을 입력할 수 있어요 · 새로고침하면 내용이 초기화되니, 작성 후 캡쳐/공유로 미리 저장해두세요</footer>
   </div>
 
   <div class="delete-bar" id="deleteBar" hidden>
@@ -506,9 +506,13 @@
 
   var CATS = ["교통비","숙박비","식비","기타비용"];
   var CAT_VAR = {"교통비":"--transport","숙박비":"--lodging","식비":"--meal","기타비용":"--etc"};
-  var STORAGE_KEY = "travelExpenseReceipts_v1";
 
-  var receipts = loadReceipts();
+  // Every open/refresh starts blank by design (each trip is a fresh sheet) —
+  // receipts live only in memory for this page session, never persisted.
+  // Drop any data cached by an older version of this app that did persist.
+  try{ localStorage.removeItem("travelExpenseReceipts_v1"); }catch(e){}
+
+  var receipts = [];
   var mode = "normal"; // normal | delete | reorder
   var selectedForDelete = new Set();
   var activeReceiptId = null;
@@ -536,16 +540,6 @@
     return "r" + Date.now().toString(36) + Math.random().toString(36).slice(2,8);
   }
 
-  function loadReceipts(){
-    try{
-      var raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    }catch(e){ return []; }
-  }
-  function persist(){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(receipts)); }
-    catch(e){ showToast("저장 공간이 부족합니다"); }
-  }
 
   function fmtWon(n){
     return (n||0).toLocaleString("ko-KR") + "원";
@@ -678,7 +672,6 @@
       dataUrls.forEach(function(dataUrl){
         receipts.push({ id: uid(), dataUrl: dataUrl, category: null, amount: null, rot: seedRotation() });
       });
-      persist();
       render();
       showToast(files.length + "장 추가됨");
     }).catch(function(){
@@ -729,7 +722,6 @@
     if (r){
       r.category = pendingCat;
       r.amount = Math.round(Number(amt));
-      persist();
       render();
     }
     closeEditModal();
@@ -757,7 +749,6 @@
     if (!selectedForDelete.size){ showToast("삭제할 영수증을 선택해주세요"); return; }
     var n = selectedForDelete.size;
     receipts = receipts.filter(function(r){ return !selectedForDelete.has(r.id); });
-    persist();
     exitModes();
     showToast(n + "장 삭제됨");
   });
@@ -778,7 +769,6 @@
       onEnd: function(){
         var ids = Array.prototype.slice.call(grid.querySelectorAll(".card")).map(function(c){ return c.dataset.id; });
         receipts.sort(function(a,b){ return ids.indexOf(a.id) - ids.indexOf(b.id); });
-        persist();
       }
     });
   });
