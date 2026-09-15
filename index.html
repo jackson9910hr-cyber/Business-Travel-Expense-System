@@ -565,7 +565,7 @@
       reader.onload = function(){
         var img = new Image();
         img.onload = function(){
-          var maxDim = 1100;
+          var maxDim = 2000;
           var scale = Math.min(1, maxDim / Math.max(img.width, img.height));
           var w = Math.round(img.width * scale);
           var h = Math.round(img.height * scale);
@@ -573,7 +573,7 @@
           canvas.width = w; canvas.height = h;
           var ctx = canvas.getContext("2d");
           ctx.drawImage(img, 0, 0, w, h);
-          resolve(canvas.toDataURL("image/jpeg", 0.85));
+          resolve(canvas.toDataURL("image/jpeg", 0.95));
         };
         img.onerror = reject;
         img.src = reader.result;
@@ -811,7 +811,54 @@
   }
 
   function captureCanvas(){
-    return html2canvas(paperEl, { scale: 2, backgroundColor: "#fffdf8", useCORS: true });
+    return html2canvas(paperEl, { scale: 2, backgroundColor: "#fffdf8", useCORS: true })
+      .then(patchCanvasWithNativePhotos);
+  }
+
+  // html2canvas rasterizes photos at their on-screen thumbnail size, which
+  // is much lower resolution than the stored original. After the screenshot,
+  // redraw each photo directly from its original <img> onto the exact same
+  // rotated rect so captures/PDF/share keep native photo quality.
+  function coverCrop(nw, nh, bw, bh){
+    var srcRatio = nw / nh;
+    var boxRatio = bw / bh;
+    var sx, sy, sw, sh;
+    if (srcRatio > boxRatio){
+      sh = nh; sw = nh * boxRatio; sx = (nw - sw) / 2; sy = 0;
+    } else {
+      sw = nw; sh = nw / boxRatio; sx = 0; sy = (nh - sh) / 2;
+    }
+    return { sx: sx, sy: sy, sw: sw, sh: sh };
+  }
+
+  function patchCanvasWithNativePhotos(canvas){
+    var paperRect = paperEl.getBoundingClientRect();
+    if (!paperRect.width) return canvas;
+    var pxRatio = canvas.width / paperRect.width;
+    var ctx = canvas.getContext("2d");
+    grid.querySelectorAll(".card").forEach(function(card){
+      var r = receipts.find(function(x){ return x.id === card.dataset.id; });
+      var frame = card.querySelector(".photo-frame");
+      var imgEl = frame && frame.querySelector("img");
+      if (!r || !imgEl || !imgEl.naturalWidth) return;
+      var frameRect = frame.getBoundingClientRect();
+      var centerX = (frameRect.left + frameRect.right) / 2;
+      var centerY = (frameRect.top + frameRect.bottom) / 2;
+      var localW = frame.offsetWidth;
+      var localH = frame.offsetHeight;
+      var rotRad = (parseFloat(r.rot) || 0) * Math.PI / 180;
+      var destCenterX = (centerX - paperRect.left) * pxRatio;
+      var destCenterY = (centerY - paperRect.top) * pxRatio;
+      var destW = localW * pxRatio;
+      var destH = localH * pxRatio;
+      var crop = coverCrop(imgEl.naturalWidth, imgEl.naturalHeight, localW, localH);
+      ctx.save();
+      ctx.translate(destCenterX, destCenterY);
+      ctx.rotate(rotRad);
+      ctx.drawImage(imgEl, crop.sx, crop.sy, crop.sw, crop.sh, -destW / 2, -destH / 2, destW, destH);
+      ctx.restore();
+    });
+    return canvas;
   }
 
   // Inside the Claude Artifact viewer, script-driven downloads (<a download>,
@@ -873,7 +920,7 @@
       var pageH = pdf.internal.pageSize.getHeight();
       var imgW = pageW;
       var imgH = canvas.height * imgW / canvas.width;
-      var imgData = canvas.toDataURL("image/jpeg", 0.92);
+      var imgData = canvas.toDataURL("image/jpeg", 0.97);
       var heightLeft = imgH;
       var position = 0;
       pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
