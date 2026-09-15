@@ -814,21 +814,52 @@
     return html2canvas(paperEl, { scale: 2, backgroundColor: "#fffdf8", useCORS: true });
   }
 
+  // Inside the Claude Artifact viewer, script-driven downloads (<a download>,
+  // blob/data links) are inert, so files must be offered through the host's
+  // downloads capability when it's present; plain <a download> is the fallback
+  // for standalone/self-hosted use where window.claude is not injected.
+  var claudeDownloadsPromise = null;
+  function getClaudeDownloads(){
+    if (claudeDownloadsPromise) return claudeDownloadsPromise;
+    if (typeof window.claude === "undefined" || !window.claude.use){
+      claudeDownloadsPromise = Promise.resolve(null);
+    } else {
+      claudeDownloadsPromise = window.claude.use("downloads").catch(function(){ return null; });
+    }
+    return claudeDownloadsPromise;
+  }
+
+  function fallbackDownload(filename, blob){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    showToast("저장 완료");
+  }
+
+  function saveFile(filename, blob){
+    return getClaudeDownloads().then(function(dl){
+      if (!dl){ fallbackDownload(filename, blob); return; }
+      return dl.save({ filename: filename, data: blob }).then(function(res){
+        showToast(res.status === "delivered" ? "공유 완료" : "저장 완료");
+      }).catch(function(err){
+        if (err && err.code === "declined") return;
+        showToast("저장에 실패했습니다");
+      });
+    });
+  }
+
   document.getElementById("actSaveImg").addEventListener("click", function(){
     shareModal.hidden = true;
     showToast("캡쳐 중...");
     captureCanvas().then(function(canvas){
       canvas.toBlob(function(blob){
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement("a");
-        a.href = url;
-        a.download = "출장비영수증_" + dateStr() + ".png";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-        showToast("이미지 저장 완료");
-      });
+        saveFile("출장비영수증_" + dateStr() + ".png", blob);
+      }, "image/png");
     });
   });
 
@@ -853,8 +884,8 @@
         pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
         heightLeft -= pageH;
       }
-      pdf.save("출장비영수증_" + dateStr() + ".pdf");
-      showToast("PDF 저장 완료");
+      var blob = pdf.output("blob");
+      saveFile("출장비영수증_" + dateStr() + ".pdf", blob);
     });
   });
 
@@ -863,21 +894,18 @@
     showToast("캡쳐 중...");
     captureCanvas().then(function(canvas){
       canvas.toBlob(function(blob){
-        var file = new File([blob], "출장비영수증_" + dateStr() + ".png", { type: "image/png" });
-        if (navigator.canShare && navigator.canShare({ files: [file] })){
-          navigator.share({ files: [file], title: "출장/외근비 영수증" }).catch(function(){});
-        } else {
-          var url = URL.createObjectURL(blob);
-          var a = document.createElement("a");
-          a.href = url;
-          a.download = file.name;
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
-          showToast("이 브라우저는 공유를 지원하지 않아 이미지로 저장했습니다");
-        }
-      });
+        var filename = "출장비영수증_" + dateStr() + ".png";
+        getClaudeDownloads().then(function(dl){
+          if (!dl && navigator.canShare){
+            var file = new File([blob], filename, { type: "image/png" });
+            if (navigator.canShare({ files: [file] })){
+              navigator.share({ files: [file], title: "출장/외근비 영수증" }).catch(function(){});
+              return;
+            }
+          }
+          saveFile(filename, blob);
+        });
+      }, "image/png");
     });
   });
 
