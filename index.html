@@ -906,49 +906,109 @@
     });
   });
 
-  document.getElementById("actSavePdf").addEventListener("click", function(){
-    shareModal.hidden = true;
-    showToast("PDF 생성 중...");
-    captureCanvas().then(function(canvas){
+  // Records each block that must never be split across PDF pages (title,
+  // summary, every receipt card incl. its tape and rotated corners) as a
+  // [top, bottom] range in paper-relative CSS px. Measured right before the
+  // capture so it matches the layout html2canvas renders.
+  function measureKeepBlocks(){
+    var base = paperEl.getBoundingClientRect();
+    var pad = 3;
+    var els = [tripTitleEl, document.getElementById("summary")]
+      .concat(Array.prototype.slice.call(grid.querySelectorAll(".card")));
+    return els.map(function(el){
+      var r = el.getBoundingClientRect();
+      var top = r.top, bottom = r.bottom;
+      Array.prototype.forEach.call(el.querySelectorAll("*"), function(c){
+        var cr = c.getBoundingClientRect();
+        if (cr.height){ top = Math.min(top, cr.top); bottom = Math.max(bottom, cr.bottom); }
+      });
+      return [top - base.top - pad, bottom - base.top + pad];
+    });
+  }
+
+  // Splits the capture into A4 pages, moving each page break up to just
+  // above any block it would cut through, so a photo is never split.
+  function buildPdf(){
+    var blocks = measureKeepBlocks();
+    var cssW = paperEl.getBoundingClientRect().width;
+    return captureCanvas().then(function(canvas){
       var jsPDF = window.jspdf.jsPDF;
       var pdf = new jsPDF("p","mm","a4");
       var pageW = pdf.internal.pageSize.getWidth();
       var pageH = pdf.internal.pageSize.getHeight();
-      var imgW = pageW;
-      var imgH = canvas.height * imgW / canvas.width;
-      var imgData = canvas.toDataURL("image/jpeg", 0.97);
-      var heightLeft = imgH;
-      var position = 0;
-      pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
-      heightLeft -= pageH;
-      while (heightLeft > 0){
-        position = heightLeft - imgH;
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, position, imgW, imgH);
-        heightLeft -= pageH;
+      var k = canvas.width / cssW;               // css px -> canvas px
+      var mmPerPx = pageW / canvas.width;        // canvas px -> mm
+      var topMargin = 6;                         // mm, continuation pages
+      // Merge overlapping ranges (cards in the same row, padded neighbours)
+      // so a break can only land in a real gap between rows.
+      var ranges = [];
+      blocks.map(function(b){ return [b[0]*k, b[1]*k]; })
+        .sort(function(a, b){ return a[0] - b[0]; })
+        .forEach(function(r){
+          var last = ranges[ranges.length - 1];
+          if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+          else ranges.push(r);
+        });
+      var total = canvas.height;
+      var start = 0, first = true;
+      while (start < total - 1){
+        var avail = (pageH - (first ? 0 : topMargin)) / mmPerPx;
+        var cut = start + avail;
+        if (cut < total){
+          for (var i = 0; i < ranges.length; i++){
+            var r = ranges[i];
+            // A block taller than a whole page can't be kept intact; leave the cut.
+            if (r[0] > start + 1 && r[0] < cut && r[1] > cut && r[1] - r[0] <= avail){ cut = r[0]; break; }
+          }
+        } else {
+          cut = total;
+        }
+        var sliceH = Math.ceil(cut - start);
+        var slice = document.createElement("canvas");
+        slice.width = canvas.width;
+        slice.height = sliceH;
+        var ctx = slice.getContext("2d");
+        ctx.fillStyle = "#fffdf8";
+        ctx.fillRect(0, 0, slice.width, slice.height);
+        ctx.drawImage(canvas, 0, start, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        if (!first) pdf.addPage();
+        pdf.setFillColor(255, 253, 248);
+        pdf.rect(0, 0, pageW, pageH, "F");
+        pdf.addImage(slice.toDataURL("image/jpeg", 0.95), "JPEG", 0, first ? 0 : topMargin, pageW, sliceH * mmPerPx);
+        start = cut;
+        first = false;
       }
-      var blob = pdf.output("blob");
+      return pdf.output("blob");
+    });
+  }
+
+  document.getElementById("actSavePdf").addEventListener("click", function(){
+    shareModal.hidden = true;
+    showToast("PDF 생성 중...");
+    buildPdf().then(function(blob){
       saveFile("출장비영수증_" + dateStr() + ".pdf", blob);
     });
   });
 
   document.getElementById("actShare").addEventListener("click", function(){
     shareModal.hidden = true;
-    showToast("캡쳐 중...");
-    captureCanvas().then(function(canvas){
-      canvas.toBlob(function(blob){
-        var filename = "출장비영수증_" + dateStr() + ".png";
-        getClaudeDownloads().then(function(dl){
-          if (!dl && navigator.canShare){
-            var file = new File([blob], filename, { type: "image/png" });
-            if (navigator.canShare({ files: [file] })){
-              navigator.share({ files: [file], title: "출장/외근비 영수증" }).catch(function(){});
-              return;
-            }
+    showToast("PDF 생성 중...");
+    buildPdf().then(function(blob){
+      var filename = "출장비영수증_" + dateStr() + ".pdf";
+      getClaudeDownloads().then(function(dl){
+        if (!dl && navigator.canShare){
+          var file = new File([blob], filename, { type: "application/pdf" });
+          if (navigator.canShare({ files: [file] })){
+            navigator.share({ files: [file], title: "출장/외근비 영수증" }).catch(function(err){
+              // Safari can reject when PDF generation outlasts the tap's
+              // user activation; fall back to a plain download then.
+              if (err && err.name === "NotAllowedError") saveFile(filename, blob);
+            });
+            return;
           }
-          saveFile(filename, blob);
-        });
-      }, "image/png");
+        }
+        saveFile(filename, blob);
+      });
     });
   });
 
