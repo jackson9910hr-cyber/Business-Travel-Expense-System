@@ -424,6 +424,29 @@
     text-align:center;color:var(--ink-soft);font-size:12px;margin-top:16px;
   }
 
+  /* PDF layout — applied only to html2canvas's cloned paper (see
+     captureCanvas), never to the live screen. Fixed A4-proportioned width
+     so the result doesn't depend on the device, and a compact one-line
+     header (title + 5-cell summary) that stays within the top ~15% of
+     page 1, leaving the rest of the page for receipt photos. */
+  .paper.pdf-capture{width:794px;padding:16px 20px 24px;}
+  .pdf-capture .title-field{
+    font-size:18px;padding:2px 10px 6px;margin:2px 6px 8px;
+    border:none;border-bottom:2px solid var(--ink);border-radius:0;
+    background:transparent;
+  }
+  .pdf-capture .title-field:empty{display:none;}
+  .pdf-capture .summary{grid-template-columns:repeat(4,1fr) 1.35fr;margin:0 6px 20px;}
+  .pdf-capture .summary .summary-item{padding:6px 4px;border-right:1px dashed #e5deca;border-bottom:none;}
+  .pdf-capture .summary-item .cat-sum{font-size:14px;margin-top:1px;}
+  .pdf-capture .summary-total{
+    grid-column:auto;flex-direction:column;justify-content:center;align-items:center;
+    gap:1px;padding:5px 8px;
+  }
+  .pdf-capture .summary-total .t-label{font-size:11px;}
+  .pdf-capture .summary-total .t-value{font-size:16px;}
+  .pdf-capture .grid{grid-template-columns:repeat(4,1fr);align-items:start;}
+
   @media (max-width:480px){
     .summary{grid-template-columns:repeat(2,1fr);}
     .summary-item:nth-child(2){border-right:none;}
@@ -853,8 +876,30 @@
   // patch pass), producing a misaligned double-exposure ghost of each
   // photo. A single html2canvas pass has no second coordinate system to
   // drift out of sync with, so it can't produce that artifact.
-  function captureCanvas(){
-    return html2canvas(paperEl, { scale: 3, backgroundColor: "#fffdf8", useCORS: true });
+  //
+  // With onClone, the capture is taken in PDF layout (.pdf-capture on the
+  // cloned paper, rendered in a desktop-width window so the mobile media
+  // query doesn't apply); onClone gets the cloned paper after that layout
+  // is in place, so measurements there match what gets rendered.
+  function captureCanvas(onClone){
+    var opts = { scale: 3, backgroundColor: "#fffdf8", useCORS: true };
+    if (onClone){
+      opts.windowWidth = 1024;
+      opts.onclone = function(doc, clonedPaper){
+        clonedPaper.classList.add("pdf-capture");
+        // html2canvas turns ::before into a real element with the live
+        // page's computed px size baked in; free it so the dashed inset
+        // border follows the wider PDF-layout paper.
+        Array.prototype.forEach.call(clonedPaper.children, function(c){
+          if (c.tagName.toLowerCase().indexOf("pseudoelement") !== -1){
+            c.style.width = "auto";
+            c.style.height = "auto";
+          }
+        });
+        onClone(clonedPaper);
+      };
+    }
+    return html2canvas(paperEl, opts);
   }
 
   // Inside the Claude Artifact viewer, script-driven downloads (<a download>,
@@ -908,13 +953,13 @@
 
   // Records each block that must never be split across PDF pages (title,
   // summary, every receipt card incl. its tape and rotated corners) as a
-  // [top, bottom] range in paper-relative CSS px. Measured right before the
-  // capture so it matches the layout html2canvas renders.
-  function measureKeepBlocks(){
-    var base = paperEl.getBoundingClientRect();
+  // [top, bottom] range in paper-relative CSS px. Measured on the cloned
+  // paper in PDF layout so it matches the layout html2canvas renders.
+  function measureKeepBlocks(paper){
+    var base = paper.getBoundingClientRect();
     var pad = 3;
-    var els = [tripTitleEl, document.getElementById("summary")]
-      .concat(Array.prototype.slice.call(grid.querySelectorAll(".card")));
+    var els = Array.prototype.slice.call(paper.querySelectorAll(".title-field, .summary, .card"))
+      .filter(function(el){ return el.getBoundingClientRect().height; });
     return els.map(function(el){
       var r = el.getBoundingClientRect();
       var top = r.top, bottom = r.bottom;
@@ -929,9 +974,11 @@
   // Splits the capture into A4 pages, moving each page break up to just
   // above any block it would cut through, so a photo is never split.
   function buildPdf(){
-    var blocks = measureKeepBlocks();
-    var cssW = paperEl.getBoundingClientRect().width;
-    return captureCanvas().then(function(canvas){
+    var blocks = [], cssW = 794;
+    return captureCanvas(function(paper){
+      blocks = measureKeepBlocks(paper);
+      cssW = paper.getBoundingClientRect().width;
+    }).then(function(canvas){
       var jsPDF = window.jspdf.jsPDF;
       var pdf = new jsPDF("p","mm","a4");
       var pageW = pdf.internal.pageSize.getWidth();
