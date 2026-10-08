@@ -861,6 +861,19 @@
   document.getElementById("btnCloseShare").addEventListener("click", function(){ shareModal.hidden = true; });
   shareModal.addEventListener("click", function(e){ if (e.target === shareModal) shareModal.hidden = true; });
 
+  function tripTitle(){
+    return tripTitleEl.textContent.replace(/\s+/g, " ").trim();
+  }
+
+  // PDF file name = the title typed in the app, as-is. Only characters no
+  // file system allows (/ \ : * ? " < > |, control chars) become "-", so
+  // "부산 출장 9/15~9/17" saves as "부산 출장 9-15~9-17.pdf". Falls back to
+  // the dated default name when the title is empty.
+  function pdfFilename(){
+    var name = tripTitle().replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-").replace(/^\.+|\.+$/g, "").trim();
+    return (name || "출장비영수증_" + dateStr()) + ".pdf";
+  }
+
   function dateStr(){
     var d = new Date();
     var p = function(n){ return String(n).padStart(2,"0"); };
@@ -981,6 +994,7 @@
     }).then(function(canvas){
       var jsPDF = window.jspdf.jsPDF;
       var pdf = new jsPDF("p","mm","a4");
+      pdf.setProperties({ title: tripTitle() || "출장/외근비 영수증" });
       var pageW = pdf.internal.pageSize.getWidth();
       var pageH = pdf.internal.pageSize.getHeight();
       var k = canvas.width / cssW;               // css px -> canvas px
@@ -1033,7 +1047,7 @@
     shareModal.hidden = true;
     showToast("PDF 생성 중...");
     buildPdf().then(function(blob){
-      saveFile("출장비영수증_" + dateStr() + ".pdf", blob);
+      saveFile(pdfFilename(), blob);
     });
   });
 
@@ -1041,12 +1055,12 @@
     shareModal.hidden = true;
     showToast("PDF 생성 중...");
     buildPdf().then(function(blob){
-      var filename = "출장비영수증_" + dateStr() + ".pdf";
+      var filename = pdfFilename();
       getClaudeDownloads().then(function(dl){
         if (!dl && navigator.canShare){
           var file = new File([blob], filename, { type: "application/pdf" });
           if (navigator.canShare({ files: [file] })){
-            navigator.share({ files: [file], title: "출장/외근비 영수증" }).catch(function(err){
+            navigator.share({ files: [file], title: tripTitle() || "출장/외근비 영수증" }).catch(function(err){
               // Safari can reject when PDF generation outlasts the tap's
               // user activation; fall back to a plain download then.
               if (err && err.name === "NotAllowedError") saveFile(filename, blob);
